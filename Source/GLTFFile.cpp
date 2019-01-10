@@ -8,6 +8,7 @@
 #include <Urho3D/IO/FileSystem.h>
 #include <Urho3D/IO/Log.h>
 #include <Urho3D/Math/Sphere.h>
+#include <Urho3D/Math/Vector4.h>
 #include <Urho3D/Resource/ResourceCache.h>
 
 #include "GLTFFile.h"
@@ -128,6 +129,32 @@ const Quaternion GLTFFile::ParseQuaternion(const JSONValue* value)
     return Quaternion(array[3].GetFloat(), array[0].GetFloat(), array[1].GetFloat(), array[2].GetFloat());
 
 }
+
+const Matrix3x4 GLTFFile::ParseMatrix(const JSONValue* value)
+{
+    // GLTF uses 4x4 matrices, trim off the last row
+
+    if (!value->IsArray())
+    {
+        return Matrix3x4::IDENTITY;
+    }
+
+        
+
+    const JSONArray& array = value->GetArray();
+
+    if (array.Size() < 12)  
+    {
+        return Matrix3x4::IDENTITY;
+    }
+
+    // maybe put some checks later, but i'm lazy
+
+    return Matrix3x4(array[0].GetFloat(), array[1].GetFloat(), array[2].GetFloat(), array[3].GetFloat(),
+                    array[4].GetFloat(), -array[5].GetFloat(), -array[6].GetFloat(), array[7].GetFloat(),
+                    array[8].GetFloat(), -array[9].GetFloat(), -array[10].GetFloat(), array[11].GetFloat());
+}
+
 
 /**
  * Called by Urho3D. Real loading begins here
@@ -366,7 +393,7 @@ bool GLTFFile::BeginLoad(Deserializer& source)
 
             }
 
-            model->SetBoundingBox(BoundingBox(Sphere(Vector3(0, 0, 0), 4)));
+            model->SetBoundingBox(BoundingBox(Sphere(Vector3(0, 0, 0), 20)));
 
             PODVector<unsigned> morphRangeStarts;
             PODVector<unsigned> morphRangeCounts;
@@ -501,7 +528,7 @@ bool GLTFFile::EndLoad()
             materials_[i] = mat;
 
             mat->SetName(GetName() + "/Material_" + StringValue(&(matArray[i]["name"])));
-            mat->SetScene(GetSubsystem<Renderer>()->GetViewport(0)->GetScene());
+            //mat->SetScene(GetSubsystem<Renderer>()->GetViewport(0)->GetScene());
             GetSubsystem<ResourceCache>()->AddManualResource(mat);
 
 
@@ -573,6 +600,10 @@ bool GLTFFile::EndLoad()
             }
 
             // TODO: Determine which technique to use based on values provided
+            mat->SetCullMode(CULL_CW);
+            mat->SetShaderParameter("Roughness", 0.00f);
+            mat->SetShaderParameter("Metallic", 0.0f);
+            mat->SetShaderParameter("MatSpecColor", Vector4(1, 1, 1, 1));
             mat->SetTechnique(0, GetSubsystem<ResourceCache>()->GetResource<Technique>("Techniques/PBR/PBRMetallicRoughDiffSpec.xml"));
 
         }
@@ -804,8 +835,34 @@ bool GLTFFile::ParsePrimitive(const JSONObject &object, int modelIndex, Model &m
         {
             const BufferAccessor& bufAcc = bufferAccessors[j];
             File& file = *(buffers_[bufAcc.buffer]);
-            file.Seek(bufAcc.bufferOffset + i * bufAcc.components * bufAcc.componentType);
-            file.Read(vertData.Get() + i * vertexByteSize + bufAcc.vertexOffset, bufAcc.components * bufAcc.componentType);
+            if (bufAcc.bufferStride)
+            {
+                // Defined stride
+                file.Seek(bufAcc.bufferOffset + i * bufAcc.bufferStride);
+            }
+            else
+            {
+                // Tightly packed
+                file.Seek(bufAcc.bufferOffset + i * bufAcc.components * bufAcc.componentType);
+            }
+            
+            float* coordX = reinterpret_cast<float*>(vertData.Get() + i * vertexByteSize + bufAcc.vertexOffset);
+            
+            
+            file.Read(coordX, bufAcc.components * bufAcc.componentType);
+            
+            if (bufAcc.vertexElement.semantic_ == SEM_POSITION || bufAcc.vertexElement.semantic_ == SEM_NORMAL)
+            {
+                // Invert X coordinate as Urho3D and glTF conflicts
+                //coordX ++;
+                //coordX ++;
+                *coordX = -(*coordX);
+                //coordX ++;
+                //*coordX = -(*coordX);
+                //coordX ++;
+                //*coordX = -(*coordX);
+            }
+            
             //URHO3D_LOGINFOF("Somevertex: %s", reinterpret_cast<const Vector3&>(vertData[i * vertexByteSize + bufAcc.vertexOffset]).ToString().CString());
         }
     }
@@ -952,7 +1009,21 @@ BufferAccessor GLTFFile::ParseAccessor(unsigned index)
     // TODO: got even more lazy, do checks for all these
     result.bufferLength = bufferView["byteLength"]->GetUInt();
     result.bufferOffset = bufferView["byteOffset"]->GetUInt();
+    if (bufferView.Contains("byteStride"))
+    {
+        result.bufferStride = bufferView["byteStride"]->GetUInt();
+    }
+    else
+    {
+        result.bufferStride = 0;
+    }
     result.buffer = bufferView["buffer"]->GetUInt();
+
+    // Byte offset override
+    if (accessor.Contains("byteOffset"))
+    {
+        result.bufferOffset += accessor["byteOffset"]->GetUInt();
+    }
 
     return result;
 }
@@ -1066,7 +1137,8 @@ SharedPtr<Node> GLTFFile::GetNode(unsigned index) const
 
     if (nodeObject.Contains("matrix"))
     {
-        // TODO parse matrix if it's there
+        URHO3D_LOGINFO(ParseMatrix(nodeObject["matrix"]).ToString()); 
+        node->SetTransform(ParseMatrix(nodeObject["matrix"]));   
     }
     else
     {
