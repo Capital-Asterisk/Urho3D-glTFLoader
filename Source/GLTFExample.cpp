@@ -90,13 +90,22 @@ void GLTFExample::CreateScene()
     auto* z = scene_->CreateComponent<Zone>();
     z->SetZoneTexture(cache->GetResource<TextureCube>("Textures/Skybox2.xml"));
     z->SetAmbientColor(Color(0.0f, 0.0f, 0.0f));
+    
     // Load the glTF files
     GLTFFile* gltfA = cache->GetResource<GLTFFile>("GLTF/DamagedHelmet/DamagedHelmet.gltf");
     GLTFFile* gltfB = cache->GetResource<GLTFFile>("GLTF/PBRSpheres/MetalRoughSpheres.gltf");
     
-    // Dump all contents into the scene
-    gltfA->GetScene(0, scene_);
-    gltfB->GetScene(0, scene_);
+    // Create nodes for tbe glTFs
+    Node* helmet = scene_->CreateChild("DamagedHelmet");
+    Node* spheres = scene_->CreateChild("MetalRoughSpheres");
+    
+    // Dump all contents of the glTF scenes into the nodes just created
+    gltfA->GetScene(0, helmet);
+    gltfB->GetScene(0, spheres);
+    
+    // Move one so they areb't inside each other
+    helmet->SetPosition(Vector3(10.0f, 0.0f, 0.0f));
+    helmet->Yaw(180.0f);
 
     // Create a directional light to the world so that we can see something. The light scene node's orientation controls the
     // light direction; we will use the SetDirection() function which calculates the orientation from a forward direction vector.
@@ -116,7 +125,7 @@ void GLTFExample::CreateScene()
     cameraNode_->CreateComponent<Camera>();
 
     // Set an initial position for the camera scene node above the plane
-    cameraNode_->SetPosition(Vector3(0.0f, 0.0f, 0.0f));
+    cameraNode_->SetPosition(Vector3(0.0f, 0.0f, -5.0f));
 }
 
 void GLTFExample::CreateInstructions()

@@ -110,6 +110,26 @@ const Vector3 GLTFFile::ParseVector3(const JSONValue* value)
 
 }
 
+const Vector4 GLTFFile::ParseVector4(const JSONValue* value)
+{
+    if (!value->IsArray())
+    {
+        return Vector4::ZERO;
+    }
+
+    const JSONArray& array = value->GetArray();
+
+    if (array.Size() < 4)
+    {
+        return Vector4::ZERO;
+    }
+
+    // maybe put some checks later, but i'm lazy
+
+    return Vector4(array[0].GetFloat(), array[1].GetFloat(), array[2].GetFloat(), array[2].GetFloat());
+
+}
+
 const Quaternion GLTFFile::ParseQuaternion(const JSONValue* value)
 {
     if (!value->IsArray())
@@ -523,9 +543,13 @@ bool GLTFFile::EndLoad()
             }
 
             const JSONObject& matObj = matArray[i].GetObject();
+            float metallic = 1.0f;
+            float roughness = 1.0f;
 
             SharedPtr<Material> mat(new Material(context_));
             materials_[i] = mat;
+            
+            String psDefines = "GLTF PBR IBL ";
 
             mat->SetName(GetName() + "/Material_" + StringValue(&(matArray[i]["name"])));
             //mat->SetScene(GetSubsystem<Renderer>()->GetViewport(0)->GetScene());
@@ -549,6 +573,8 @@ bool GLTFFile::EndLoad()
                     }
 
                     mat->SetTexture(TU_NORMAL, textures_[texIndex]);
+                    
+                    psDefines += "NORMAL ";
                 }
             }
 
@@ -574,6 +600,8 @@ bool GLTFFile::EndLoad()
                         }
 
                         mat->SetTexture(TU_DIFFUSE, textures_[texIndex]);
+                        
+                        psDefines += "DIFFMAP ";
                     }
                     URHO3D_LOGINFO("Base colour texture is being loaded.");
                 }
@@ -595,16 +623,46 @@ bool GLTFFile::EndLoad()
                         }
 
                         mat->SetTexture(TU_SPECULAR, textures_[texIndex]);
+                        
+                        psDefines += "METALLIC ROUGHNESS";
                     }
+                }
+               
+                if (JSONValue* roughnessFactor = pbrObj["roughnessFactor"])
+                {
+                    if (!roughnessFactor->IsNumber())
+                    {
+                        continue;
+                    }
+                    roughness = roughnessFactor->GetFloat();
+                }
+                
+                if (JSONValue* metallicFactor = pbrObj["metallicFactor"])
+                {
+                    if (!metallicFactor->IsNumber())
+                    {
+                        continue;
+                    }
+                    metallic = metallicFactor->GetFloat();
+                }
+                          
+                if (JSONValue* baseColorFactor = pbrObj["baseColorFactor"])
+                {
+                    if (!baseColorFactor->IsArray())
+                    {
+                        continue;
+                    }
+                    mat->SetShaderParameter("MatDiffColor",  ParseVector4(baseColorFactor));
                 }
             }
 
-            // TODO: Determine which technique to use based on values provided
             mat->SetCullMode(CULL_CW);
-            mat->SetShaderParameter("Roughness", 0.00f);
-            mat->SetShaderParameter("Metallic", 0.0f);
+            mat->SetShaderParameter("Roughness", roughness);
+            mat->SetShaderParameter("Metallic", metallic);
             mat->SetShaderParameter("MatSpecColor", Vector4(1, 1, 1, 1));
             mat->SetTechnique(0, GetSubsystem<ResourceCache>()->GetResource<Technique>("Techniques/PBR/PBRMetallicRoughDiffSpec.xml"));
+            
+            mat->SetPixelShaderDefines(psDefines);
 
         }
     }
@@ -1229,3 +1287,4 @@ SharedPtr<Node> GLTFFile::GetNode(unsigned index) const
 
     return node;
 }
+
